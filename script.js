@@ -75,6 +75,11 @@ function ensureSheepHasInlineLeft() {
     sheep.style.left = leftPx + "px";
   }
 }
+// Detect mobile / coarse-pointer devices (used to make jump-forward larger on phones)
+const isMobile =
+  (typeof window !== "undefined" &&
+    (window.matchMedia && window.matchMedia("(pointer: coarse)").matches)) ||
+  /Mobi|Android|iPhone|iPad|iPod|Phone/i.test(navigator.userAgent || "");
 
 /* movement computations */
 function computeStepManual() {
@@ -83,8 +88,13 @@ function computeStepManual() {
 }
 function computeJumpForward() {
   const w = (container && container.clientWidth) || window.innerWidth;
-  return Math.max(24, Math.round(w * 0.18)); // 18% forward on jump
+
+  // Desktop uses 18% (keeps current laptop feel). Mobile uses a larger percentage
+  // because the visual container is smaller and we need a bigger forward translation.
+  const percent = isMobile ? 0.28 : 0.18; // <-- tweak mobile percent if still small
+  return Math.max(24, Math.round(w * percent));
 }
+
 
 /* move functions */
 function moveLeft() {
@@ -119,21 +129,31 @@ function jump() {
   );
   const targetLeft = Math.min(maxLeft, sheep.offsetLeft + forward);
 
+  // Start vertical animation
   sheep.classList.add("animateSheep");
 
-  const oldTransition = sheep.style.transition || "";
-  sheep.style.transition = "left 0.6s ease";
+  // Ensure the browser has applied the inline left before we add a transition and change it.
+  // Using two requestAnimationFrame ticks makes the transition reliable on mobile.
+  const prevTransition = sheep.style.transition || "";
+  // Set temporary transition for horizontal move (match jump duration)
+  const jumpDurationMs = 600;
+  function doHorizontalMove() {
+    sheep.style.transition = `left ${jumpDurationMs}ms ease`;
+    // next frame apply new left
+    requestAnimationFrame(() => {
+      sheep.style.left = targetLeft + "px";
+    });
+    // cleanup after animation finishes
+    setTimeout(() => {
+      sheep.classList.remove("animateSheep");
+      sheep.style.transition = prevTransition;
+    }, jumpDurationMs);
+  }
 
-  // move forward in next frame
-  requestAnimationFrame(() => {
-    sheep.style.left = targetLeft + "px";
-  });
-
-  setTimeout(() => {
-    sheep.classList.remove("animateSheep");
-    sheep.style.transition = oldTransition;
-  }, 600);
+  // first rAF to ensure layout applied, second to ensure transition will run
+  requestAnimationFrame(() => requestAnimationFrame(doHorizontalMove));
 }
+
 
 /* pointer handlers */
 function onControlPointer(ev, action) {
