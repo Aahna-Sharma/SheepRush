@@ -1,4 +1,6 @@
-/* script.js - corrected: stable scoring, stronger movement, pointer dedupe, proper resume positions */
+/* script.js — robust scoring: score when obstacle.right < sheep.left (one-per-obstacle),
+   single-tap jump that also moves forward, preload safe, pointer dedupe, container-relative steps.
+*/
 
 /* audio */
 const audiogo = new Audio("gameover.mp3");
@@ -24,11 +26,10 @@ let score = 0;
 let gameRunning = false;
 let gameLoopId = null;
 let ignoreCollisions = true;
-let prevObstacleCenter = Number.POSITIVE_INFINITY;
 let restartHintAdded = false;
 
-/* scoring cooldown to avoid double-count */
-let crossCooldown = false;
+/* per-obstacle scoring flag */
+let scoredForThisObstacle = false;
 
 /* pointer dedupe */
 let lastPointerTime = 0;
@@ -39,7 +40,7 @@ function isRecentPointer() {
   return Date.now() - lastPointerTime < 400;
 }
 
-/* preload assets (non-blocking: errors count as loaded after attempt) */
+/* preload assets */
 const imagesToLoad = [
   "sheep.png",
   "dragon.png",
@@ -51,7 +52,6 @@ const totalAssets = imagesToLoad.length + audiosToLoad.length;
 function markLoaded() {
   loadedCount++;
 }
-
 imagesToLoad.forEach((src) => {
   const i = new Image();
   i.onload = markLoaded;
@@ -65,49 +65,37 @@ audiosToLoad.forEach((src) => {
   a.src = src;
 });
 
-/* helper */
+/* helpers */
 function tryPlaySound(a) {
   a.play().catch(() => {});
 }
-
-/* Movement helpers - container-relative step (bigger % for better feel) */
-function isJumping() {
-  return sheep.classList.contains("animateSheep");
-}
-function jump() {
-  if (isJumping()) return;
-  sheep.classList.add("animateSheep");
-  // remove after animation time
-  setTimeout(() => sheep.classList.remove("animateSheep"), 600);
-}
-
-/* If the sheep lacks an explicit left inline, freeze its computed left at start of game
-   so jumps do not affect layout. We'll set this in startGame() */
 function ensureSheepHasInlineLeft() {
   if (!sheep.style.left || sheep.style.left === "") {
-    // read its current offsetLeft and write back as inline px value
     const leftPx = sheep.offsetLeft || 10;
     sheep.style.left = leftPx + "px";
   }
 }
 
-function computeStep() {
+/* movement computations */
+function computeStepManual() {
   const w = (container && container.clientWidth) || window.innerWidth;
-  // 12% step gives a noticeably larger movement on mobile; tune if needed
-  return Math.max(8, Math.round(w * 0.12));
+  return Math.max(8, Math.round(w * 0.08)); // 8% manual
+}
+function computeJumpForward() {
+  const w = (container && container.clientWidth) || window.innerWidth;
+  return Math.max(24, Math.round(w * 0.18)); // 18% forward on jump
 }
 
+/* move functions */
 function moveLeft() {
   ensureSheepHasInlineLeft();
-  const step = computeStep();
+  const step = computeStepManual();
   const newLeft = Math.max(0, sheep.offsetLeft - step);
   sheep.style.left = newLeft + "px";
 }
-
 function moveRight() {
   ensureSheepHasInlineLeft();
-  const step = computeStep();
-  // account for container padding/reserved bottom not affecting width; subtract small margin
+  const step = computeStepManual();
   const maxLeft = Math.max(
     0,
     (container.clientWidth || window.innerWidth) - sheep.offsetWidth - 6
@@ -116,7 +104,38 @@ function moveRight() {
   sheep.style.left = newLeft + "px";
 }
 
-/* unified pointer handler to avoid duplicate touch+click */
+/* jump: vertical + forward using CSS transition so it's smooth */
+function isJumping() {
+  return sheep.classList.contains("animateSheep");
+}
+function jump() {
+  if (isJumping()) return;
+  ensureSheepHasInlineLeft();
+
+  const forward = computeJumpForward();
+  const maxLeft = Math.max(
+    0,
+    (container.clientWidth || window.innerWidth) - sheep.offsetWidth - 6
+  );
+  const targetLeft = Math.min(maxLeft, sheep.offsetLeft + forward);
+
+  sheep.classList.add("animateSheep");
+
+  const oldTransition = sheep.style.transition || "";
+  sheep.style.transition = "left 0.6s ease";
+
+  // move forward in next frame
+  requestAnimationFrame(() => {
+    sheep.style.left = targetLeft + "px";
+  });
+
+  setTimeout(() => {
+    sheep.classList.remove("animateSheep");
+    sheep.style.transition = oldTransition;
+  }, 600);
+}
+
+/* pointer handlers */
 function onControlPointer(ev, action) {
   ev.preventDefault();
   ev.stopPropagation();
@@ -125,8 +144,6 @@ function onControlPointer(ev, action) {
   else if (action === "right") moveRight();
   else if (action === "jump") jump();
 }
-
-/* attach pointer handlers */
 if (leftBtn)
   leftBtn.addEventListener("pointerdown", (e) => onControlPointer(e, "left"));
 if (rightBtn)
@@ -146,17 +163,14 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowRight" || e.key === "d") moveRight();
 });
 
-/* collision detection - safe checks */
+/* collision detection (keeps previous safe exits) */
 function detectCollision() {
   if (!gameRunning || ignoreCollisions) return false;
   const sheepRect = sheep.getBoundingClientRect();
   const obsRect = obstacle.getBoundingClientRect();
   const containerRect = container.getBoundingClientRect();
 
-  // if obstacle hasn't entered visible container yet -> no collision
   if (obsRect.left > containerRect.right - 8) return false;
-
-  // non-overlap quick test
   if (obsRect.right < sheepRect.left || obsRect.left > sheepRect.right)
     return false;
 
@@ -178,42 +192,35 @@ function detectCollision() {
   return dx < collisionXThreshold && dy < collisionYThreshold;
 }
 
-/* crossing-based scoring with cooldown */
-function checkScoringByCrossing() {
-  if (ignoreCollisions) {
-    // set prev to current center so we don't detect crossing immediately after enabling
-    const obsRect = obstacle.getBoundingClientRect();
-    prevObstacleCenter = obsRect.left + obsRect.width / 2;
-    return;
-  }
+/* NEW robust scoring: increment once when obstacle.right < sheep.left */
+function checkScoringByObstaclePassing() {
+  if (!gameRunning || ignoreCollisions) return;
 
   const sheepRect = sheep.getBoundingClientRect();
   const obsRect = obstacle.getBoundingClientRect();
-  const obstacleCenter = obsRect.left + obsRect.width / 2;
-  const sheepCenter = sheepRect.left + sheepRect.width / 2;
+  const containerRect = container.getBoundingClientRect();
 
-  if (
-    !crossCooldown &&
-    prevObstacleCenter > sheepCenter &&
-    obstacleCenter < sheepCenter
-  ) {
-    // single valid crossing
+  // if obstacle is just restarting (off-screen to right), reset scored flag
+  if (obsRect.left > containerRect.right - 20) {
+    scoredForThisObstacle = false;
+    return;
+  }
+
+  // if obstacle's right edge has passed sheep's left edge and we haven't scored for this obstacle
+  if (!scoredForThisObstacle && obsRect.right < sheepRect.left) {
+    scoredForThisObstacle = true;
     score += 1;
     updateScore(score);
-    crossCooldown = true;
-    setTimeout(() => (crossCooldown = false), 900);
 
-    // speed up obstacle slightly and clamp
+    // speed up obstacle slightly
     const computed = window.getComputedStyle(obstacle);
     const cur =
       parseFloat(computed.getPropertyValue("animation-duration")) || 5;
-    obstacle.style.animationDuration = Math.max(1.0, cur - 0.12) + "s";
+    obstacle.style.animationDuration = Math.max(0.9, cur - 0.12) + "s";
   }
-
-  prevObstacleCenter = obstacleCenter;
 }
 
-/* Game Over - remove existing hints defensively and add one */
+/* game over handling */
 function onGameOver() {
   if (!gameRunning) return;
   gameRunning = false;
@@ -222,11 +229,9 @@ function onGameOver() {
   audio.pause();
   obstacle.classList.remove("obstacleAni");
 
-  // clear previous hints
-  const prevHints = gameOverEl.parentElement.querySelectorAll(".restartHint");
-  prevHints.forEach((h) => h.remove());
+  // remove duplicate hints then add one
+  document.querySelectorAll(".restartHint").forEach((e) => e.remove());
   restartHintAdded = false;
-
   if (!restartHintAdded) {
     const hint = document.createElement("div");
     hint.className = "restartHint";
@@ -234,13 +239,11 @@ function onGameOver() {
     gameOverEl.parentElement.appendChild(hint);
     restartHintAdded = true;
   }
-
   if (gameLoopId) cancelAnimationFrame(gameLoopId);
 }
 
 /* restart */
 function restartGame() {
-  // remove hints
   document.querySelectorAll(".restartHint").forEach((e) => e.remove());
   restartHintAdded = false;
 
@@ -248,20 +251,17 @@ function restartGame() {
   updateScore(score);
   gameOverEl.textContent = "Welcome to SheepRush";
   ignoreCollisions = true;
-  prevObstacleCenter = Number.POSITIVE_INFINITY;
-  crossCooldown = false;
+  scoredForThisObstacle = false;
 
   setTimeout(() => {
     ignoreCollisions = false;
   }, 700);
 
-  // reset obstacle animation cleanly
   obstacle.style.animationDuration = "";
   obstacle.style.left = "";
   void obstacle.offsetWidth;
   obstacle.classList.add("obstacleAni");
 
-  // reset sheep inline left to CSS start (let CSS clamp apply)
   sheep.style.left = "";
   ensureSheepHasInlineLeft();
 
@@ -270,7 +270,7 @@ function restartGame() {
   runGameLoop();
 }
 
-/* update UI */
+/* update score UI */
 function updateScore(s) {
   scoreCont.textContent = "Your Score: " + s;
 }
@@ -282,7 +282,7 @@ function gameStep() {
     onGameOver();
     return;
   }
-  checkScoringByCrossing();
+  checkScoringByObstaclePassing();
   gameLoopId = requestAnimationFrame(gameStep);
 }
 function runGameLoop() {
@@ -290,41 +290,32 @@ function runGameLoop() {
   gameLoopId = requestAnimationFrame(gameStep);
 }
 
-/* startGame: wait for preloads or timeout, then begin */
+/* start sequence: wait for preload then start */
 function startGame() {
-  // set sheep inline left to fix jump jerking behavior
   ensureSheepHasInlineLeft();
-
-  // wait until assets loaded or wait 2s max
-  const startDeadline = Date.now() + 2000;
-  const waiter = () => {
-    if (loadedCount >= totalAssets || Date.now() > startDeadline) {
+  const deadline = Date.now() + 2000;
+  const wait = () => {
+    if (loadedCount >= totalAssets || Date.now() > deadline) {
       beginRun();
-    } else {
-      setTimeout(waiter, 120);
-    }
+    } else setTimeout(wait, 150);
   };
-  waiter();
+  wait();
 }
-
-/* begin run after overlay removed */
 function beginRun() {
   tryPlaySound(audio);
   if (startOverlay) startOverlay.remove();
 
-  // clear any previous restart hints
   document.querySelectorAll(".restartHint").forEach((e) => e.remove());
   restartHintAdded = false;
 
-  // start obstacle animation after small settle delay and enable collisions
   ignoreCollisions = true;
   obstacle.classList.remove("obstacleAni");
   obstacle.style.left = "";
   void obstacle.offsetWidth;
   setTimeout(() => {
-    // set prev center to current center so we don't immediately score
     const r = obstacle.getBoundingClientRect();
-    prevObstacleCenter = r.left + r.width / 2;
+    // reset per-obstacle scored flag so first obstacle won't be scored prematurely
+    scoredForThisObstacle = false;
     obstacle.classList.add("obstacleAni");
     ignoreCollisions = false;
   }, 300);
@@ -335,7 +326,7 @@ function beginRun() {
   runGameLoop();
 }
 
-/* restart on click (guard against recent pointer events to avoid double triggers) */
+/* restart on click */
 document.addEventListener("click", (e) => {
   if (isRecentPointer()) return;
   if (!gameRunning) restartGame();
@@ -348,6 +339,6 @@ if (startBtn)
     startGame();
   });
 
-/* init state */
+/* init */
 obstacle.classList.remove("obstacleAni");
 updateScore(score);
