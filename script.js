@@ -1,6 +1,6 @@
-/* script.js - corrected preload + robust movement + mobile-safe controls */
+/* script.js - corrected: stable scoring, stronger movement, pointer dedupe, proper resume positions */
 
-/* audio elements */
+/* audio */
 const audiogo = new Audio("gameover.mp3");
 const audio = new Audio("music.mp3");
 audio.loop = true;
@@ -24,8 +24,11 @@ let score = 0;
 let gameRunning = false;
 let gameLoopId = null;
 let ignoreCollisions = true;
-let restartHintAdded = false;
 let prevObstacleCenter = Number.POSITIVE_INFINITY;
+let restartHintAdded = false;
+
+/* scoring cooldown to avoid double-count */
+let crossCooldown = false;
 
 /* pointer dedupe */
 let lastPointerTime = 0;
@@ -33,34 +36,28 @@ function recordPointer() {
   lastPointerTime = Date.now();
 }
 function isRecentPointer() {
-  return Date.now() - lastPointerTime < 600;
+  return Date.now() - lastPointerTime < 400;
 }
 
-/* --- Preload assets safely --- */
+/* preload assets (non-blocking: errors count as loaded after attempt) */
 const imagesToLoad = [
   "sheep.png",
   "dragon.png",
   "green-meadow-landscape-game-background-vector.jpg",
 ];
 const audiosToLoad = ["music.mp3", "gameover.mp3"];
-
 let loadedCount = 0;
 const totalAssets = imagesToLoad.length + audiosToLoad.length;
-
 function markLoaded() {
   loadedCount++;
-  // optional: console.log("asset loaded:", loadedCount, "/", totalAssets);
 }
 
-/* preload images */
 imagesToLoad.forEach((src) => {
-  const img = new Image();
-  img.onload = markLoaded;
-  img.onerror = markLoaded; // treat error as loaded to avoid blocking
-  img.src = src;
+  const i = new Image();
+  i.onload = markLoaded;
+  i.onerror = markLoaded;
+  i.src = src;
 });
-
-/* preload audio (use onloadeddata if possible) */
 audiosToLoad.forEach((src) => {
   const a = document.createElement("audio");
   a.onloadeddata = markLoaded;
@@ -68,51 +65,65 @@ audiosToLoad.forEach((src) => {
   a.src = src;
 });
 
-/* helper to play audio on user gesture */
+/* helper */
 function tryPlaySound(a) {
   a.play().catch(() => {});
 }
 
-/* movement helpers */
+/* Movement helpers - container-relative step (bigger % for better feel) */
 function isJumping() {
   return sheep.classList.contains("animateSheep");
 }
 function jump() {
   if (isJumping()) return;
   sheep.classList.add("animateSheep");
+  // remove after animation time
   setTimeout(() => sheep.classList.remove("animateSheep"), 600);
 }
 
-/* compute step from container width (container-relative) */
+/* If the sheep lacks an explicit left inline, freeze its computed left at start of game
+   so jumps do not affect layout. We'll set this in startGame() */
+function ensureSheepHasInlineLeft() {
+  if (!sheep.style.left || sheep.style.left === "") {
+    // read its current offsetLeft and write back as inline px value
+    const leftPx = sheep.offsetLeft || 10;
+    sheep.style.left = leftPx + "px";
+  }
+}
+
 function computeStep() {
   const w = (container && container.clientWidth) || window.innerWidth;
-  return Math.max(8, Math.round(w * 0.1)); // 10% step (tune if needed)
+  // 12% step gives a noticeably larger movement on mobile; tune if needed
+  return Math.max(8, Math.round(w * 0.12));
 }
 
 function moveLeft() {
+  ensureSheepHasInlineLeft();
   const step = computeStep();
   const newLeft = Math.max(0, sheep.offsetLeft - step);
   sheep.style.left = newLeft + "px";
 }
 
 function moveRight() {
+  ensureSheepHasInlineLeft();
   const step = computeStep();
-  const maxLeft =
-    container && container.clientWidth
-      ? container.clientWidth - sheep.offsetWidth
-      : window.innerWidth - sheep.offsetWidth;
+  // account for container padding/reserved bottom not affecting width; subtract small margin
+  const maxLeft = Math.max(
+    0,
+    (container.clientWidth || window.innerWidth) - sheep.offsetWidth - 6
+  );
   const newLeft = Math.min(maxLeft, sheep.offsetLeft + step);
   sheep.style.left = newLeft + "px";
 }
 
-/* unified pointer handler (prevents duplicate touch+click) */
+/* unified pointer handler to avoid duplicate touch+click */
 function onControlPointer(ev, action) {
   ev.preventDefault();
   ev.stopPropagation();
   recordPointer();
   if (action === "left") moveLeft();
-  if (action === "right") moveRight();
-  if (action === "jump") jump();
+  else if (action === "right") moveRight();
+  else if (action === "jump") jump();
 }
 
 /* attach pointer handlers */
@@ -123,9 +134,8 @@ if (rightBtn)
 if (jumpBtn)
   jumpBtn.addEventListener("pointerdown", (e) => onControlPointer(e, "jump"));
 
-/* keyboard support */
+/* keyboard */
 document.addEventListener("keydown", (e) => {
-  // try start audio on any key press
   tryPlaySound(audio);
   if (!gameRunning) {
     if (e.key === "r" || e.key === "R") startGame();
@@ -136,18 +146,17 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowRight" || e.key === "d") moveRight();
 });
 
-/* collision detection */
+/* collision detection - safe checks */
 function detectCollision() {
   if (!gameRunning || ignoreCollisions) return false;
   const sheepRect = sheep.getBoundingClientRect();
   const obsRect = obstacle.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
 
-  // obstacle not on-screen yet -> no collision
-  const containerRect =
-    (container && container.getBoundingClientRect()) ||
-    document.documentElement.getBoundingClientRect();
-  if (obsRect.left > containerRect.right - 10) return false;
+  // if obstacle hasn't entered visible container yet -> no collision
+  if (obsRect.left > containerRect.right - 8) return false;
 
+  // non-overlap quick test
   if (obsRect.right < sheepRect.left || obsRect.left > sheepRect.right)
     return false;
 
@@ -169,46 +178,55 @@ function detectCollision() {
   return dx < collisionXThreshold && dy < collisionYThreshold;
 }
 
-/* scoring */
+/* crossing-based scoring with cooldown */
 function checkScoringByCrossing() {
   if (ignoreCollisions) {
-    prevObstacleCenter = Number.POSITIVE_INFINITY;
+    // set prev to current center so we don't detect crossing immediately after enabling
+    const obsRect = obstacle.getBoundingClientRect();
+    prevObstacleCenter = obsRect.left + obsRect.width / 2;
     return;
   }
+
   const sheepRect = sheep.getBoundingClientRect();
   const obsRect = obstacle.getBoundingClientRect();
   const obstacleCenter = obsRect.left + obsRect.width / 2;
   const sheepCenter = sheepRect.left + sheepRect.width / 2;
-  if (prevObstacleCenter > sheepCenter && obstacleCenter < sheepCenter) {
-    score++;
+
+  if (
+    !crossCooldown &&
+    prevObstacleCenter > sheepCenter &&
+    obstacleCenter < sheepCenter
+  ) {
+    // single valid crossing
+    score += 1;
     updateScore(score);
+    crossCooldown = true;
+    setTimeout(() => (crossCooldown = false), 900);
+
+    // speed up obstacle slightly and clamp
     const computed = window.getComputedStyle(obstacle);
     const cur =
       parseFloat(computed.getPropertyValue("animation-duration")) || 5;
-    obstacle.style.animationDuration = Math.max(1.2, cur - 0.12) + "s";
+    obstacle.style.animationDuration = Math.max(1.0, cur - 0.12) + "s";
   }
+
   prevObstacleCenter = obstacleCenter;
 }
 
-/* Game over handling — remove existing hints first, then add only one */
+/* Game Over - remove existing hints defensively and add one */
 function onGameOver() {
   if (!gameRunning) return;
   gameRunning = false;
-
-  // set Game Over text once
   gameOverEl.textContent = "Game Over!";
-
-  // play sounds & stop obstacle
-  audiogo.play().catch(()=>{});
+  audiogo.play().catch(() => {});
   audio.pause();
   obstacle.classList.remove("obstacleAni");
 
-  // remove any previous restart hint elements (defensive)
-  const oldHints = gameOverEl.parentElement.querySelectorAll(".restartHint");
-  oldHints.forEach(h => h.remove());
+  // clear previous hints
+  const prevHints = gameOverEl.parentElement.querySelectorAll(".restartHint");
+  prevHints.forEach((h) => h.remove());
   restartHintAdded = false;
 
-  // add a single restart hint
   if (!restartHintAdded) {
     const hint = document.createElement("div");
     hint.className = "restartHint";
@@ -217,15 +235,13 @@ function onGameOver() {
     restartHintAdded = true;
   }
 
-  // stop the game loop
   if (gameLoopId) cancelAnimationFrame(gameLoopId);
 }
 
-/* Restart — remove hint(s) and restore initial state */
+/* restart */
 function restartGame() {
-  // remove any existing restart hints before resetting UI
-  const ex = document.querySelectorAll(".restartHint");
-  ex.forEach(e => e.remove());
+  // remove hints
+  document.querySelectorAll(".restartHint").forEach((e) => e.remove());
   restartHintAdded = false;
 
   score = 0;
@@ -233,25 +249,28 @@ function restartGame() {
   gameOverEl.textContent = "Welcome to SheepRush";
   ignoreCollisions = true;
   prevObstacleCenter = Number.POSITIVE_INFINITY;
+  crossCooldown = false;
 
-  // short grace period after restart
-  setTimeout(() => { ignoreCollisions = false; }, 700);
+  setTimeout(() => {
+    ignoreCollisions = false;
+  }, 700);
 
-  // reset obstacle animation: let CSS control start position
+  // reset obstacle animation cleanly
   obstacle.style.animationDuration = "";
   obstacle.style.left = "";
   void obstacle.offsetWidth;
   obstacle.classList.add("obstacleAni");
 
-  // reset sheep position
+  // reset sheep inline left to CSS start (let CSS clamp apply)
   sheep.style.left = "";
+  ensureSheepHasInlineLeft();
 
   tryPlaySound(audio);
   gameRunning = true;
   runGameLoop();
 }
 
-/* update score UI */
+/* update UI */
 function updateScore(s) {
   scoreCont.textContent = "Your Score: " + s;
 }
@@ -271,62 +290,64 @@ function runGameLoop() {
   gameLoopId = requestAnimationFrame(gameStep);
 }
 
-/* startGame: wait for assets to be loaded (or time out) */
+/* startGame: wait for preloads or timeout, then begin */
 function startGame() {
-  // if assets not finished loading, wait briefly (but do not block forever)
-  if (loadedCount < totalAssets) {
-    // wait up to a short amount and then proceed (prevents infinite block on bad network)
-    const startWaitLimit = Date.now() + 3000; // wait up to 3s more
-    const wait = () => {
-      if (loadedCount >= totalAssets || Date.now() > startWaitLimit) {
-        beginRun();
-      } else {
-        setTimeout(wait, 150);
-      }
-    };
-    wait();
-    return;
-  }
-  beginRun();
+  // set sheep inline left to fix jump jerking behavior
+  ensureSheepHasInlineLeft();
+
+  // wait until assets loaded or wait 2s max
+  const startDeadline = Date.now() + 2000;
+  const waiter = () => {
+    if (loadedCount >= totalAssets || Date.now() > startDeadline) {
+      beginRun();
+    } else {
+      setTimeout(waiter, 120);
+    }
+  };
+  waiter();
 }
 
-/* set up and start gameplay */
+/* begin run after overlay removed */
 function beginRun() {
-  // user gesture acknowledged
   tryPlaySound(audio);
   if (startOverlay) startOverlay.remove();
 
-  // small delay, then start obstacle animation and enable collisions
+  // clear any previous restart hints
+  document.querySelectorAll(".restartHint").forEach((e) => e.remove());
+  restartHintAdded = false;
+
+  // start obstacle animation after small settle delay and enable collisions
   ignoreCollisions = true;
   obstacle.classList.remove("obstacleAni");
   obstacle.style.left = "";
   void obstacle.offsetWidth;
   setTimeout(() => {
+    // set prev center to current center so we don't immediately score
+    const r = obstacle.getBoundingClientRect();
+    prevObstacleCenter = r.left + r.width / 2;
     obstacle.classList.add("obstacleAni");
     ignoreCollisions = false;
-    prevObstacleCenter = Number.POSITIVE_INFINITY;
   }, 300);
 
   score = 0;
   updateScore(score);
-  restartHintAdded = false;
   gameRunning = true;
   runGameLoop();
 }
 
-/* click to restart (but ignore clicks immediately after pointer events) */
-document.addEventListener("click", () => {
+/* restart on click (guard against recent pointer events to avoid double triggers) */
+document.addEventListener("click", (e) => {
   if (isRecentPointer()) return;
   if (!gameRunning) restartGame();
 });
 
-/* attach start button */
+/* wire start button */
 if (startBtn)
   startBtn.addEventListener("click", (e) => {
     recordPointer();
     startGame();
   });
 
-/* initialization: ensure obstacle doesn't run before start */
+/* init state */
 obstacle.classList.remove("obstacleAni");
 updateScore(score);
