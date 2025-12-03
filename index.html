@@ -1,19 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>SheepRush</title>
-        <link rel="stylesheet" href="style.css" />
-        <script src="script.js" defer></script>
-    </head>
-    <body>
-        <div class="gameContainer">
-           
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SheepRush</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="script.js" defer></script>
+</head>
+
+<body>
+    <div class="gameContainer">
+        <div class="hud">
             <div class="gameOver">Welcome to SheepRush</div>
-            <div class="sheep"></div>
             <div id="scoreCont">Your Score: 0</div>
-            <div class="obstacle obstacleAni"></div>
         </div>
-    </body>
+
+        <div class="sheep"></div>
+        <div class="obstacle obstacleAni"></div>
+
+        <!-- Mobile controls: shown visually but only appear on small screens via CSS -->
+        <div class="touch-controls" aria-hidden="false">
+            <button id="leftBtn" class="tc-btn">◀</button>
+            <button id="jumpBtn" class="tc-btn">▲</button>
+            <button id="rightBtn" class="tc-btn">▶</button>
+        </div>
+    </div>
+</body>
+
 </html>
