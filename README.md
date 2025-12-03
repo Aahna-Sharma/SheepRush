@@ -36,7 +36,4 @@ Built using **HTML**, **CSS**, and **JavaScript**.
 - **JavaScript** — movement, collision detection, scoring, sound playback  
 
 
-Screenshot 
-![SS of game](<img width="1797" height="1018" alt="image" src="https://github.com/user-attachments/assets/1491f98d-2594-468c-93ae-5e50f1720917" />
-)
 
