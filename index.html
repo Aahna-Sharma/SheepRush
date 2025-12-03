@@ -3,37 +3,36 @@
 
 <head>
     <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>SheepRush</title>
     <link rel="stylesheet" href="style.css" />
     <script src="script.js" defer></script>
 </head>
 
 <body>
-    <!-- Start overlay ensures a user gesture to start audio and prevents autoplay collisions -->
-    <div id="startOverlay" class="start-overlay">
+    <!-- Start overlay ensures a user gesture (for audio) and waits until assets load -->
+    <div id="startOverlay" class="start-overlay" aria-hidden="false">
         <div class="start-card">
             <h1>SheepRush</h1>
-            <p>Tap to Start</p>
+            <p>Tap to start</p>
             <button id="startBtn">Start</button>
         </div>
     </div>
 
-    <div class="gameContainer">
+    <div class="gameContainer" id="gameContainer">
         <div class="hud">
             <div class="gameOver">Welcome to SheepRush</div>
             <div id="scoreCont">Your Score: 0</div>
         </div>
 
         <div class="sheep" aria-hidden="true"></div>
-        <div class="obstacle obstacleAni" aria-hidden="true"></div>
+        <div class="obstacle" aria-hidden="true"></div>
 
-        <!-- Mobile controls -->
-        <div class="touch-controls" aria-hidden="false">
-            <button id="leftBtn" class="tc-btn" aria-label="Left">◀</button>
-            <button id="jumpBtn" class="tc-btn" aria-label="Jump">▲</button>
-            <button id="rightBtn" class="tc-btn" aria-label="Right">▶</button>
+        <!-- touch controls: left, jump, right -->
+        <div class="touch-controls" role="group" aria-label="game controls">
+            <button id="leftBtn" class="tc-btn" aria-label="left">◀</button>
+            <button id="jumpBtn" class="tc-btn" aria-label="jump">▲</button>
+            <button id="rightBtn" class="tc-btn" aria-label="right">▶</button>
         </div>
     </div>
 </body>
