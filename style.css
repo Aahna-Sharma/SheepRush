@@ -131,16 +131,18 @@ body {
 }
 
 /* obstacle moves by translating left relative to current position */
+/* remove transform-based movement; animate the left property */
 @keyframes obstacleAni {
     0% {
-        transform: translateX(0);
+        left: 100vw;
+        /* start off the right edge */
     }
 
     100% {
-        transform: translateX(-120vw);
+        left: calc(-1 * var(--sprite-size));
+        /* end off the left edge */
     }
 }
-
 /* restart hint style */
 .restartHint {
     font-size: clamp(12px, 2.8vw, 16px);
@@ -148,18 +150,21 @@ body {
     margin-top: 6px;
 }
 
-/* touch controls (desktop hidden by default) */
+/* touch controls: use fixed so they sit above mobile UI and safe area */
 .touch-controls {
-    position: absolute;
-    bottom: 3vh;
+    position: fixed;
     left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
     transform: translateX(-50%);
     display: none;
-    gap: 0.5rem;
-    z-index: 30;
+    /* will be enabled for small screens */
+    gap: 0.6rem;
+    z-index: 60;
     pointer-events: auto;
+    padding: 6px;
 }
 
+/* buttons */
 .tc-btn {
     pointer-events: auto;
     width: 64px;
@@ -167,11 +172,14 @@ body {
     border-radius: 12px;
     border: none;
     font-size: 22px;
-    background: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
-/* small screens show touch controls and tweak HUD */
+/* show touch controls on small screens */
 @media (max-width: 700px) {
     .touch-controls {
         display: flex;
@@ -200,15 +208,5 @@ body {
 
     #scoreCont {
         font-size: clamp(14px, 4vw, 22px);
-    }
-}
-
-/* reduced motion */
-@media (prefers-reduced-motion: reduce) {
-
-    .animateSheep,
-    .obstacleAni {
-        animation: none !important;
-        transform: none !important;
     }
 }

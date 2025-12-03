@@ -1,4 +1,4 @@
-/* script.js — SheepRush (updated scoring: crossing detection) */
+/* script.js — SheepRush (tuned collision + mobile-safe controls) */
 
 /* Audio setup */
 const audiogo = new Audio("gameover.mp3");
@@ -37,19 +37,20 @@ let gameLoopId = null;
 let ignoreCollisions = true;
 let restartHintAdded = false;
 
-/* --- New: track previous obstacle center to detect crossing */
-let prevObstacleCenter = Number.POSITIVE_INFINITY; // large positive at start
+/* Track previous obstacle center to detect crossing */
+let prevObstacleCenter = Number.POSITIVE_INFINITY;
 
-/* init obstacle */
+/* init obstacle — start farther off-screen and longer grace */
 (function initObstacleStart() {
-  obstacle.style.left = "110vw";
+  obstacle.style.left = "140vw"; // start further to the right
   obstacle.classList.remove("obstacleAni");
   void obstacle.offsetWidth;
   obstacle.classList.add("obstacleAni");
   ignoreCollisions = true;
+  // give the page a longer grace so animations and layout settle
   setTimeout(() => {
     ignoreCollisions = false;
-  }, 700);
+  }, 1200);
 })();
 
 /* Movement helpers */
@@ -112,11 +113,18 @@ if (leftBtn && rightBtn && jumpBtn) {
   jumpBtn.addEventListener("click", jump);
 }
 
-/* Collision detection */
+/* Collision detection — safer and faster checks */
 function detectCollision() {
   if (!gameRunning || ignoreCollisions) return false;
+
   const sheepRect = sheep.getBoundingClientRect();
   const obsRect = obstacle.getBoundingClientRect();
+
+  // quick early exit: if obstacle is fully left or right of sheep, no collision
+  if (obsRect.right < sheepRect.left || obsRect.left > sheepRect.right)
+    return false;
+
+  // center distance method with tighter thresholds
   const dx = Math.abs(
     sheepRect.left + sheepRect.width / 2 - (obsRect.left + obsRect.width / 2)
   );
@@ -124,45 +132,38 @@ function detectCollision() {
     sheepRect.top + sheepRect.height / 2 - (obsRect.top + obsRect.height / 2)
   );
   const collisionXThreshold = Math.min(
-    (sheepRect.width + obsRect.width) * 0.38,
-    120
-  );
+    (sheepRect.width + obsRect.width) * 0.32,
+    100
+  ); // tightened
   const collisionYThreshold = Math.min(
-    (sheepRect.height + obsRect.height) * 0.38,
-    120
-  );
+    (sheepRect.height + obsRect.height) * 0.32,
+    100
+  ); // tightened
+
   return dx < collisionXThreshold && dy < collisionYThreshold;
 }
 
-/* --- New crossing-based scoring */
+/* Crossing-based scoring (unchanged logic) */
 function checkScoringByCrossing() {
   if (ignoreCollisions) {
-    // reset prev center so we don't accidentally detect a crossing during grace
     prevObstacleCenter = Number.POSITIVE_INFINITY;
     return;
   }
 
   const sheepRect = sheep.getBoundingClientRect();
   const obsRect = obstacle.getBoundingClientRect();
-
   const obstacleCenter = obsRect.left + obsRect.width / 2;
   const sheepCenter = sheepRect.left + sheepRect.width / 2;
 
-  // prevObstacleCenter > sheepCenter  AND obstacleCenter < sheepCenter => crossed from right -> left
   if (prevObstacleCenter > sheepCenter && obstacleCenter < sheepCenter) {
-    // valid single crossing: increment score once
     score += 1;
     updateScore(score);
-
-    // speed up obstacle a bit
     const computed = window.getComputedStyle(obstacle);
     const cur =
       parseFloat(computed.getPropertyValue("animation-duration")) || 5;
-    const newDur = Math.max(1.2, cur - 0.2);
+    const newDur = Math.max(1.4, cur - 0.15);
     obstacle.style.animationDuration = newDur + "s";
   }
-
-  // update prevObstacleCenter for next frame
   prevObstacleCenter = obstacleCenter;
 }
 
@@ -194,21 +195,18 @@ function restartGame() {
   prevObstacleCenter = Number.POSITIVE_INFINITY;
   setTimeout(() => {
     ignoreCollisions = false;
-  }, 700);
+  }, 900);
 
-  // remove hint if present
   const ex = document.querySelector(".restartHint");
   if (ex) ex.remove();
 
-  // reset obstacle animation cleanly
   obstacle.style.animationDuration = "";
-  obstacle.style.left = "110vw";
-  void obstacle.offsetWidth;
+  
+  obstacle.style.left = "";
+  void obstacle.offsetWidth; // reflow
   obstacle.classList.add("obstacleAni");
 
-  // reset sheep
   sheep.style.left = "";
-
   tryPlaySound(audio);
   gameRunning = true;
   runGameLoop();
@@ -226,10 +224,7 @@ function gameStep() {
     onGameOver();
     return;
   }
-
-  // use crossing-based scoring
   checkScoringByCrossing();
-
   gameLoopId = requestAnimationFrame(gameStep);
 }
 function runGameLoop() {
@@ -249,4 +244,3 @@ document.addEventListener("keydown", (e) => {
 /* init */
 updateScore(score);
 runGameLoop();
-
