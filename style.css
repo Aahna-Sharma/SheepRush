@@ -1,4 +1,4 @@
-/* style.css — responsive styling for SheepRush */
+/* style.css — responsive styling for SheepRush (updated controls + safe area) */
 
 /* reset */
 * {
@@ -17,17 +17,16 @@
 /* page */
 html,
 body {
-    height: 100%;
+    height: 100%
 }
 
 body {
-    background-color: rgb(255, 0, 0);
-    /* you can change */
+    background: #fff;
     overflow: hidden;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
 }
 
-/* container and background */
+/* container */
 .gameContainer {
     position: relative;
     width: 100vw;
@@ -39,13 +38,13 @@ body {
     overflow: hidden;
 }
 
-/* HUD container (prevents overlap) */
+/* HUD */
 .hud {
     position: absolute;
     top: 1.6vh;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 20;
+    z-index: 50;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -53,7 +52,6 @@ body {
     pointer-events: none;
 }
 
-/* gameOver and score (stacked) */
 .gameOver {
     font-size: var(--gameover-font);
     text-align: center;
@@ -62,53 +60,58 @@ body {
     text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.6);
     line-height: 1;
     margin: 0;
-    pointer-events: none;
 }
 
 #scoreCont {
     font-size: var(--score-font);
-    color: rgb(36, 41, 122);
+    color: royalblue;
     pointer-events: none;
 }
 
-/* sheep sprite */
+/* sprites */
 .sheep {
     position: absolute;
     bottom: var(--ground-offset);
     left: clamp(10px, 18vw, 300px);
-    /* initial left; JS may override inline */
     width: var(--sprite-size);
     height: var(--sprite-size);
     background-image: url('sheep.png');
-    background-repeat: no-repeat;
     background-size: contain;
     background-position: center;
     z-index: 5;
     pointer-events: none;
 }
 
-/* obstacle sprite */
 .obstacle {
     position: absolute;
     bottom: var(--ground-offset);
-    left: 110vw;
-    /* start well off-screen to the right */
+    left: 100vw;
+    /* animation will move it */
     width: var(--sprite-size);
     height: var(--sprite-size);
     background-image: url('dragon.png');
-    background-repeat: no-repeat;
     background-size: contain;
     background-position: center;
     z-index: 4;
     pointer-events: none;
 }
 
-/* obstacle animation uses transform for smoother GPU-driven motion */
+/* obstacle: animate left so it's consistent across devices */
 .obstacleAni {
     animation: obstacleAni 5s linear infinite;
 }
 
-/* sheep jump animation */
+@keyframes obstacleAni {
+    0% {
+        left: 100vw;
+    }
+
+    100% {
+        left: calc(-1 * var(--sprite-size));
+    }
+}
+
+/* sheep jump */
 .animateSheep {
     animation: sheep 0.6s ease;
 }
@@ -116,55 +119,64 @@ body {
 @keyframes sheep {
     0% {
         bottom: var(--ground-offset);
-        transform: translateY(0);
     }
 
     50% {
         bottom: calc(var(--ground-offset) + clamp(220px, 28vh, 420px));
-        transform: translateY(-8px);
     }
 
     100% {
         bottom: var(--ground-offset);
-        transform: translateY(0);
     }
 }
 
-/* obstacle moves by translating left relative to current position */
-/* remove transform-based movement; animate the left property */
-@keyframes obstacleAni {
-    0% {
-        left: 100vw;
-        /* start off the right edge */
-    }
-
-    100% {
-        left: calc(-1 * var(--sprite-size));
-        /* end off the left edge */
-    }
+/* start overlay */
+.start-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 999;
 }
-/* restart hint style */
+
+.start-card {
+    background: #fff;
+    padding: 1.2rem 1.4rem;
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+#startBtn {
+    margin-top: 8px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+}
+
+/* restart hint */
 .restartHint {
     font-size: clamp(12px, 2.8vw, 16px);
-    color: rgba(0, 0, 0, 0.9);
+    color: #222;
     margin-top: 6px;
 }
 
-/* touch controls: use fixed so they sit above mobile UI and safe area */
+/* touch controls - FIXED, above safe area */
 .touch-controls {
     position: fixed;
     left: 50%;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
     transform: translateX(-50%);
     display: none;
-    /* will be enabled for small screens */
     gap: 0.6rem;
-    z-index: 60;
+    z-index: 80;
     pointer-events: auto;
     padding: 6px;
 }
 
-/* buttons */
 .tc-btn {
     pointer-events: auto;
     width: 64px;
@@ -172,15 +184,15 @@ body {
     border-radius: 12px;
     border: none;
     font-size: 22px;
-    background: rgba(255, 255, 255, 0.95);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
     display: inline-flex;
     align-items: center;
     justify-content: center;
 }
 
-/* show touch controls on small screens */
-@media (max-width: 700px) {
+/* show controls on small screens */
+@media (max-width:700px) {
     .touch-controls {
         display: flex;
         align-items: center;
@@ -208,5 +220,15 @@ body {
 
     #scoreCont {
         font-size: clamp(14px, 4vw, 22px);
+    }
+}
+
+/* reduced motion */
+@media (prefers-reduced-motion: reduce) {
+
+    .animateSheep,
+    .obstacleAni {
+        animation: none !important;
+        transform: none !important;
     }
 }

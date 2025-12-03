@@ -10,20 +10,29 @@
 </head>
 
 <body>
+    <!-- Start overlay ensures a user gesture to start audio and prevents autoplay collisions -->
+    <div id="startOverlay" class="start-overlay">
+        <div class="start-card">
+            <h1>SheepRush</h1>
+            <p>Tap to Start</p>
+            <button id="startBtn">Start</button>
+        </div>
+    </div>
+
     <div class="gameContainer">
         <div class="hud">
             <div class="gameOver">Welcome to SheepRush</div>
             <div id="scoreCont">Your Score: 0</div>
         </div>
 
-        <div class="sheep"></div>
-        <div class="obstacle obstacleAni"></div>
+        <div class="sheep" aria-hidden="true"></div>
+        <div class="obstacle obstacleAni" aria-hidden="true"></div>
 
-        <!-- Mobile controls: shown visually but only appear on small screens via CSS -->
+        <!-- Mobile controls -->
         <div class="touch-controls" aria-hidden="false">
-            <button id="leftBtn" class="tc-btn">◀</button>
-            <button id="jumpBtn" class="tc-btn">▲</button>
-            <button id="rightBtn" class="tc-btn">▶</button>
+            <button id="leftBtn" class="tc-btn" aria-label="Left">◀</button>
+            <button id="jumpBtn" class="tc-btn" aria-label="Jump">▲</button>
+            <button id="rightBtn" class="tc-btn" aria-label="Right">▶</button>
         </div>
     </div>
 </body>

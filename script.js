@@ -1,27 +1,12 @@
-/* script.js — SheepRush (tuned collision + mobile-safe controls) */
+/* script.js — preload assets, robust movement, mobile-safe controls */
 
-/* Audio setup */
 const audiogo = new Audio("gameover.mp3");
 const audio = new Audio("music.mp3");
 audio.loop = true;
 audio.preload = "auto";
 audio.volume = 0.6;
-function tryPlaySound(a) {
-  a.play().catch(() => {});
-}
-function startAudioOnFirstGesture() {
-  tryPlaySound(audio);
-  document.removeEventListener("keydown", startAudioOnFirstGesture);
-  document.removeEventListener("click", startAudioOnFirstGesture);
-  document.removeEventListener("touchstart", startAudioOnFirstGesture);
-}
-document.addEventListener("keydown", startAudioOnFirstGesture, { once: true });
-document.addEventListener("click", startAudioOnFirstGesture, { once: true });
-document.addEventListener("touchstart", startAudioOnFirstGesture, {
-  once: true,
-});
 
-/* DOM refs */
+/* DOM refs (may be null until DOM ready but defer script ensures loaded) */
 const sheep = document.querySelector(".sheep");
 const obstacle = document.querySelector(".obstacle");
 const gameOverEl = document.querySelector(".gameOver");
@@ -29,31 +14,64 @@ const scoreCont = document.getElementById("scoreCont");
 const leftBtn = document.getElementById("leftBtn");
 const rightBtn = document.getElementById("rightBtn");
 const jumpBtn = document.getElementById("jumpBtn");
+const startOverlay = document.getElementById("startOverlay");
+const startBtn = document.getElementById("startBtn");
 
-/* Game state */
+/* game state */
 let score = 0;
-let gameRunning = true;
+let gameRunning = false; // start only after assets + user gesture
 let gameLoopId = null;
 let ignoreCollisions = true;
 let restartHintAdded = false;
-
-/* Track previous obstacle center to detect crossing */
 let prevObstacleCenter = Number.POSITIVE_INFINITY;
 
-/* init obstacle — start farther off-screen and longer grace */
-(function initObstacleStart() {
-  obstacle.style.left = "140vw"; // start further to the right
-  obstacle.classList.remove("obstacleAni");
-  void obstacle.offsetWidth;
-  obstacle.classList.add("obstacleAni");
-  ignoreCollisions = true;
-  // give the page a longer grace so animations and layout settle
-  setTimeout(() => {
-    ignoreCollisions = false;
-  }, 1200);
-})();
+/* preload images and audio before starting collisions */
+const assets = [
+  { type: "img", src: "sheep.png" },
+  { type: "img", src: "dragon.png" },
+  { type: "img", src: "green-meadow-landscape-game-background-vector.jpg" },
+  { type: "audio", src: "music.mp3" },
+  { type: "audio", src: "gameover.mp3" },
+];
+let loaded = 0;
+function assetLoaded() {
+  loaded++;
+}
+/* create loaders */
+assets.forEach((a) => {
+  if (a.type === "img") {
+    const im = new Image();
+    im.onload = assetLoaded;
+    im.src = a.src;
+  } else {
+    // audio: create an element and try to load metadata
+    const au = document.createElement("audio");
+    au.src = a.src;
+    au.onloadeddata = assetLoaded;
+    // don't append to DOM
+  }
+});
 
-/* Movement helpers */
+/* helper to start playing audio safely after user gesture */
+function tryPlaySound(a) {
+  a.play().catch(() => {});
+}
+
+/* Start game when user taps Start button */
+function startFromOverlay() {
+  // ensure assets loaded (if not, wait a little)
+  if (loaded < assets.length) {
+    // show a short wait and then start once loaded
+    setTimeout(startFromOverlay, 300);
+    return;
+  }
+  tryPlaySound(audio);
+  if (startOverlay) startOverlay.remove();
+  startGame();
+}
+if (startBtn) startBtn.addEventListener("click", startFromOverlay);
+
+/* Movement helpers using offsetLeft (container-relative) — more reliable on mobile */
 function isJumping() {
   return sheep.classList.contains("animateSheep");
 }
@@ -62,50 +80,47 @@ function jump() {
   sheep.classList.add("animateSheep");
   setTimeout(() => sheep.classList.remove("animateSheep"), 600);
 }
+
 function moveLeft() {
-  const rect = sheep.getBoundingClientRect();
-  const container = document
-    .querySelector(".gameContainer")
-    .getBoundingClientRect();
+  const parent = sheep.offsetParent || document.querySelector(".gameContainer");
   const step = Math.max(8, Math.round(window.innerWidth * 0.06));
-  const newLeft = Math.max(0, rect.left - step - container.left);
-  sheep.style.left = newLeft + "px";
-}
-function moveRight() {
-  const rect = sheep.getBoundingClientRect();
-  const container = document
-    .querySelector(".gameContainer")
-    .getBoundingClientRect();
-  const step = Math.max(8, Math.round(window.innerWidth * 0.06));
-  const newLeft = Math.min(
-    container.width - rect.width,
-    rect.left + step - container.left
-  );
+  const newLeft = Math.max(0, sheep.offsetLeft - step);
   sheep.style.left = newLeft + "px";
 }
 
-/* Keyboard & touch listeners */
+function moveRight() {
+  const parentEl = document.querySelector(".gameContainer");
+  const parentWidth = parentEl.clientWidth;
+  const step = Math.max(8, Math.round(window.innerWidth * 0.06));
+  const maxLeft = parentWidth - sheep.offsetWidth;
+  const newLeft = Math.min(maxLeft, sheep.offsetLeft + step);
+  sheep.style.left = newLeft + "px";
+}
+
+/* Touch + keyboard hooks */
 document.addEventListener("keydown", (e) => {
+  // start music on first keydown if not started
   tryPlaySound(audio);
-  if (!gameRunning && (e.key === "r" || e.key === "R")) {
-    restartGame();
+  if (!gameRunning) {
+    if (e.key === "r" || e.key === "R") startGame();
     return;
   }
-  if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") jump();
-  if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") moveLeft();
-  if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") moveRight();
+  if (e.key === "ArrowUp" || e.key === "w") jump();
+  if (e.key === "ArrowLeft" || e.key === "a") moveLeft();
+  if (e.key === "ArrowRight" || e.key === "d") moveRight();
 });
+
 if (leftBtn && rightBtn && jumpBtn) {
-  leftBtn.addEventListener("touchstart", (ev) => {
-    ev.preventDefault();
+  leftBtn.addEventListener("touchstart", (e) => {
+    e.preventDefault();
     moveLeft();
   });
-  rightBtn.addEventListener("touchstart", (ev) => {
-    ev.preventDefault();
+  rightBtn.addEventListener("touchstart", (e) => {
+    e.preventDefault();
     moveRight();
   });
-  jumpBtn.addEventListener("touchstart", (ev) => {
-    ev.preventDefault();
+  jumpBtn.addEventListener("touchstart", (e) => {
+    e.preventDefault();
     jump();
   });
   leftBtn.addEventListener("click", moveLeft);
@@ -113,18 +128,18 @@ if (leftBtn && rightBtn && jumpBtn) {
   jumpBtn.addEventListener("click", jump);
 }
 
-/* Collision detection — safer and faster checks */
+/* detect collision: safe checks + tighter thresholds */
 function detectCollision() {
   if (!gameRunning || ignoreCollisions) return false;
-
   const sheepRect = sheep.getBoundingClientRect();
   const obsRect = obstacle.getBoundingClientRect();
 
-  // quick early exit: if obstacle is fully left or right of sheep, no collision
+  // early exit: if obstacle hasn't entered visible area yet, no collision
+  if (obsRect.left > window.innerWidth + 20) return false;
+
   if (obsRect.right < sheepRect.left || obsRect.left > sheepRect.right)
     return false;
 
-  // center distance method with tighter thresholds
   const dx = Math.abs(
     sheepRect.left + sheepRect.width / 2 - (obsRect.left + obsRect.width / 2)
   );
@@ -132,42 +147,38 @@ function detectCollision() {
     sheepRect.top + sheepRect.height / 2 - (obsRect.top + obsRect.height / 2)
   );
   const collisionXThreshold = Math.min(
-    (sheepRect.width + obsRect.width) * 0.32,
+    (sheepRect.width + obsRect.width) * 0.3,
     100
-  ); // tightened
+  );
   const collisionYThreshold = Math.min(
     (sheepRect.height + obsRect.height) * 0.32,
     100
-  ); // tightened
-
+  );
   return dx < collisionXThreshold && dy < collisionYThreshold;
 }
 
-/* Crossing-based scoring (unchanged logic) */
+/* scoring by center crossing */
 function checkScoringByCrossing() {
   if (ignoreCollisions) {
     prevObstacleCenter = Number.POSITIVE_INFINITY;
     return;
   }
-
   const sheepRect = sheep.getBoundingClientRect();
   const obsRect = obstacle.getBoundingClientRect();
   const obstacleCenter = obsRect.left + obsRect.width / 2;
   const sheepCenter = sheepRect.left + sheepRect.width / 2;
-
   if (prevObstacleCenter > sheepCenter && obstacleCenter < sheepCenter) {
-    score += 1;
+    score++;
     updateScore(score);
     const computed = window.getComputedStyle(obstacle);
     const cur =
       parseFloat(computed.getPropertyValue("animation-duration")) || 5;
-    const newDur = Math.max(1.4, cur - 0.15);
-    obstacle.style.animationDuration = newDur + "s";
+    obstacle.style.animationDuration = Math.max(1.4, cur - 0.15) + "s";
   }
   prevObstacleCenter = obstacleCenter;
 }
 
-/* Game over handling */
+/* game over */
 function onGameOver() {
   if (!gameRunning) return;
   gameRunning = false;
@@ -185,7 +196,7 @@ function onGameOver() {
   if (gameLoopId) cancelAnimationFrame(gameLoopId);
 }
 
-/* Restart */
+/* restart */
 function restartGame() {
   score = 0;
   updateScore(score);
@@ -195,29 +206,28 @@ function restartGame() {
   prevObstacleCenter = Number.POSITIVE_INFINITY;
   setTimeout(() => {
     ignoreCollisions = false;
-  }, 900);
+  }, 700);
 
   const ex = document.querySelector(".restartHint");
   if (ex) ex.remove();
 
-  obstacle.style.animationDuration = "";
-  
-  obstacle.style.left = "";
-  void obstacle.offsetWidth; // reflow
+  obstacle.style.animationDuration = ""; // let CSS default work
+  obstacle.style.left = ""; // let animation start from 100vw
+  void obstacle.offsetWidth;
   obstacle.classList.add("obstacleAni");
 
-  sheep.style.left = "";
+  sheep.style.left = ""; // reset to CSS start
   tryPlaySound(audio);
   gameRunning = true;
   runGameLoop();
 }
 
-/* Update score UI */
+/* update score UI */
 function updateScore(s) {
   scoreCont.textContent = "Your Score: " + s;
 }
 
-/* Main loop */
+/* main loop */
 function gameStep() {
   if (!gameRunning) return;
   if (detectCollision()) {
@@ -233,14 +243,31 @@ function runGameLoop() {
   gameLoopId = requestAnimationFrame(gameStep);
 }
 
-/* restart on click/key */
-document.addEventListener("click", () => {
+/* startGame: called after overlay removed and assets loaded */
+function startGame() {
+  // ensure obstacle animation only starts after dragon image is ready
+  // (assets preloaded earlier)
+  ignoreCollisions = true;
+  // small delay so animation starts and layout settles
+  setTimeout(() => {
+    obstacle.classList.add("obstacleAni");
+    ignoreCollisions = false;
+    prevObstacleCenter = Number.POSITIVE_INFINITY;
+  }, 300);
+
+  // start loop
+  score = 0;
+  updateScore(score);
+  restartHintAdded = false;
+  gameRunning = true;
+  runGameLoop();
+}
+
+/* click to restart if game over */
+document.addEventListener("click", (e) => {
   if (!gameRunning) restartGame();
 });
-document.addEventListener("keydown", (e) => {
-  if (!gameRunning && (e.key === "r" || e.key === "R")) restartGame();
-});
 
-/* init */
+/* init UI state: keep animation paused until start */
+obstacle.classList.remove("obstacleAni");
 updateScore(score);
-runGameLoop();
