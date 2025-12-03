@@ -82,20 +82,23 @@ function jump() {
 }
 
 function moveLeft() {
-  const parent = sheep.offsetParent || document.querySelector(".gameContainer");
-  const step = Math.max(8, Math.round(window.innerWidth * 0.06));
-  const newLeft = Math.max(0, sheep.offsetLeft - step);
+  const container = document.querySelector(".gameContainer");
+  const parentWidth = container.clientWidth; // container-relative width
+  const step = Math.max(8, Math.round(parentWidth * 0.08)); // 6% of container
+  const maxLeft = 0;
+  const newLeft = Math.max(maxLeft, sheep.offsetLeft - step);
   sheep.style.left = newLeft + "px";
 }
 
 function moveRight() {
-  const parentEl = document.querySelector(".gameContainer");
-  const parentWidth = parentEl.clientWidth;
-  const step = Math.max(8, Math.round(window.innerWidth * 0.06));
-  const maxLeft = parentWidth - sheep.offsetWidth;
+  const container = document.querySelector(".gameContainer");
+  const parentWidth = container.clientWidth;
+  const step = Math.max(8, Math.round(parentWidth * 0.08));
+  const maxLeft = container.clientWidth - sheep.offsetWidth;
   const newLeft = Math.min(maxLeft, sheep.offsetLeft + step);
   sheep.style.left = newLeft + "px";
 }
+
 
 /* Touch + keyboard hooks */
 document.addEventListener("keydown", (e) => {
