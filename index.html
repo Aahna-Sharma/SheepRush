@@ -10,33 +10,33 @@
 </head>
 
 <body>
-    <!-- Start overlay ensures a user gesture (for audio) -->
+    <!-- Start overlay (tap anywhere also starts) -->
     <div id="startOverlay" class="start-overlay" aria-hidden="false">
         <div class="start-card">
             <h1>SheepRush</h1>
-            <p>Tap to start</p>
+            <p>Tap anywhere to start</p>
             <button id="startBtn" aria-label="Start game">Start</button>
         </div>
     </div>
 
     <div class="gameContainer" id="gameContainer" role="application" aria-label="SheepRush game">
         <div class="hud">
-            <div class="gameOver" id="gameOver">Welcome to SheepRush</div>
+            <div id="gameOver" class="gameOver">Welcome to SheepRush</div>
             <div class="hud-row">
                 <div id="scoreCont">Your Score: 0</div>
                 <button id="pauseBtn" class="hud-btn" aria-pressed="false">Pause</button>
             </div>
         </div>
 
-        <div class="sheep" aria-hidden="true"></div>
-        <div class="obstacle" aria-hidden="true"></div>
-
-        <!-- touch controls -->
-        <div class="touch-controls" role="group" aria-label="game controls">
-            <button id="leftBtn" class="tc-btn" aria-label="left">◀</button>
-            <button id="jumpBtn" class="tc-btn" aria-label="jump">▲</button>
-            <button id="rightBtn" class="tc-btn" aria-label="right">▶</button>
+        <!-- sprite wrappers; images align their visible pixels to wrapper bottom -->
+        <div class="sprite sheep" aria-hidden="true">
+            <img src="sheep.png" alt="sheep">
         </div>
+
+        <div class="sprite obstacle" aria-hidden="true" data-scored="0">
+            <img src="dragon.png" alt="dragon">
+        </div>
+
     </div>
 </body>
 
