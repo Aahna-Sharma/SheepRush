@@ -10,25 +10,28 @@
 </head>
 
 <body>
-    <!-- Start overlay ensures a user gesture (for audio) and waits until assets load -->
+    <!-- Start overlay ensures a user gesture (for audio) -->
     <div id="startOverlay" class="start-overlay" aria-hidden="false">
         <div class="start-card">
             <h1>SheepRush</h1>
             <p>Tap to start</p>
-            <button id="startBtn">Start</button>
+            <button id="startBtn" aria-label="Start game">Start</button>
         </div>
     </div>
 
-    <div class="gameContainer" id="gameContainer">
+    <div class="gameContainer" id="gameContainer" role="application" aria-label="SheepRush game">
         <div class="hud">
-            <div class="gameOver">Welcome to SheepRush</div>
-            <div id="scoreCont">Your Score: 0</div>
+            <div class="gameOver" id="gameOver">Welcome to SheepRush</div>
+            <div class="hud-row">
+                <div id="scoreCont">Your Score: 0</div>
+                <button id="pauseBtn" class="hud-btn" aria-pressed="false">Pause</button>
+            </div>
         </div>
 
         <div class="sheep" aria-hidden="true"></div>
         <div class="obstacle" aria-hidden="true"></div>
 
-        <!-- touch controls: left, jump, right -->
+        <!-- touch controls -->
         <div class="touch-controls" role="group" aria-label="game controls">
             <button id="leftBtn" class="tc-btn" aria-label="left">◀</button>
             <button id="jumpBtn" class="tc-btn" aria-label="jump">▲</button>

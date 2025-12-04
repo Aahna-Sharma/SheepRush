@@ -1,41 +1,57 @@
-/* script.js — aggressive mobile fix:
-   - jump = vertical + forward (mobile gets bigger forward)
-   - scoring: robust right-edge crossing detection with prevRight check
-   - preloads preserved, pointer dedupe preserved
-*/
-
-/* audio setup */
-const audiogo = new Audio("gameover.mp3");
-const audio = new Audio("music.mp3");
-audio.loop = true;
-audio.preload = "auto";
-audio.volume = 0.6;
+// script.js — final corrected version
+"use strict";
 
 /* DOM refs */
 const container = document.getElementById("gameContainer");
 const sheep = document.querySelector(".sheep");
 const obstacle = document.querySelector(".obstacle");
-const gameOverEl = document.querySelector(".gameOver");
+const gameOverEl =
+  document.getElementById("gameOver") || document.querySelector(".gameOver");
 const scoreCont = document.getElementById("scoreCont");
 const leftBtn = document.getElementById("leftBtn");
 const rightBtn = document.getElementById("rightBtn");
 const jumpBtn = document.getElementById("jumpBtn");
 const startOverlay = document.getElementById("startOverlay");
 const startBtn = document.getElementById("startBtn");
+const pauseBtn = document.getElementById("pauseBtn");
+
+/* guards */
+if (!sheep) throw new Error("Missing .sheep element");
+if (!obstacle) throw new Error("Missing .obstacle element");
+
+/* audio */
+const audio = new Audio("music.mp3");
+audio.loop = true;
+audio.preload = "auto";
+audio.volume = 0.6;
+const audiogo = new Audio("gameover.mp3");
+
+/* simple helpers */
+function tryPlay(a) {
+  a?.play?.().catch(() => {});
+}
+function tryPause(a) {
+  try {
+    a?.pause?.();
+  } catch (e) {}
+}
+
+/* device detect */
+const isMobile =
+  (typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(pointer: coarse)").matches) ||
+  /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
 
 /* state */
 let score = 0;
 let gameRunning = false;
+let paused = false;
 let gameLoopId = null;
-let ignoreCollisions = true;
-let restartHintAdded = false;
-
-/* scoring flags per obstacle */
 let scoredForThisObstacle = false;
-/* previous right edge (to detect clear crossing across frames) */
-let prevObstacleRight = Number.NEGATIVE_INFINITY;
 
-/* pointer dedupe */
+
+/* pointer dedupe (retained) */
 let lastPointerTime = 0;
 function recordPointer() {
   lastPointerTime = Date.now();
@@ -44,7 +60,7 @@ function isRecentPointer() {
   return Date.now() - lastPointerTime < 450;
 }
 
-/* preload (non-blocking for errors) */
+/* preload assets (non-blocking) */
 const imagesToLoad = [
   "sheep.png",
   "dragon.png",
@@ -69,110 +85,63 @@ audiosToLoad.forEach((src) => {
   a.src = src;
 });
 
-/* small mobile detector */
-const isMobile =
-  (typeof window !== "undefined" &&
-    window.matchMedia &&
-    window.matchMedia("(pointer: coarse)").matches) ||
-  /Mobi|Android|iPhone|iPad|iPod|Phone/i.test(navigator.userAgent || "");
-
-/* helpers */
-function tryPlaySound(a) {
-  a.play().catch(() => {});
+/* geometry helpers */
+function ensureSheepLeft() {
+  if (!sheep.style.left || sheep.style.left === "")
+    sheep.style.left = (sheep.offsetLeft || 10) + "px";
 }
-function ensureSheepHasInlineLeft() {
-  if (!sheep.style.left || sheep.style.left === "") {
-    const leftPx = sheep.offsetLeft || 10;
-    sheep.style.left = leftPx + "px";
-  }
-}
-
-/* movement */
-function computeStepManual() {
-  const w = (container && container.clientWidth) || window.innerWidth;
-  return Math.max(8, Math.round(w * 0.08)); // manual left/right: 8%
-}
-function computeJumpForward() {
-  const w = (container && container.clientWidth) || window.innerWidth;
-  // Mobile sheep jumps VERY far forward
-  const percent = isMobile ? 0.65 : 0.18;
-
-  return Math.max(30, Math.round(w * percent));
-}
-
-function moveLeft() {
-  ensureSheepHasInlineLeft();
-  const step = computeStepManual();
-  const newLeft = Math.max(0, sheep.offsetLeft - step);
-  sheep.style.left = newLeft + "px";
-}
-function moveRight() {
-  ensureSheepHasInlineLeft();
-  const step = computeStepManual();
-  const maxLeft = Math.max(
-    0,
-    (container.clientWidth || window.innerWidth) - sheep.offsetWidth - 6
+function containerRect() {
+  return (
+    (container && container.getBoundingClientRect()) || {
+      left: 0,
+      right: window.innerWidth,
+    }
   );
-  const newLeft = Math.min(maxLeft, sheep.offsetLeft + step);
-  sheep.style.left = newLeft + "px";
 }
 
-/* robust jump: vertical + forward with double rAF, cleaned transition */
+/* movement helpers */
+function computeStep() {
+  const w = (container && container.clientWidth) || window.innerWidth;
+  return Math.max(8, Math.round(w * 0.07));
+}
+
+/* Dino-like single jump: fixed vertical keyframes (in CSS) + small horizontal nudge (consistent)
+   Horizontal nudge is NOT based on obstacle position anymore — keeps jump deterministic.
+*/
+let isCurrentlyJumping = false;
 function isJumping() {
-  return sheep.classList.contains("animateSheep");
+  return isCurrentlyJumping || sheep.classList.contains("animateSheep");
 }
-
-// REPLACE your existing jump() with this function
-
 function jump() {
-  // don't start another jump while already jumping
+  if (!gameRunning || paused) return;
   if (isJumping()) return;
 
-  // ensure inline left exists so transitions animate predictably
-  ensureSheepHasInlineLeft();
+  ensureSheepLeft();
 
-  const containerWidth = (container && container.clientWidth) || window.innerWidth;
-  const currLeft = sheep.offsetLeft;
-  const maxLeft = Math.max(0, (container.clientWidth || window.innerWidth) - sheep.offsetWidth - 6);
+  // fixed forward nudge (desktop vs mobile)
+  const w = (container && container.clientWidth) || window.innerWidth;
+  const forwardPx = Math.round(w * (isMobile ? 0.14 : 0.18)); // mobile 14% now (tuned)
+  const maxLeft = Math.max(
+    0,
+    ((container && container.clientWidth) || window.innerWidth) -
+      sheep.offsetWidth -
+      6
+  );
+  const startLeft = sheep.offsetLeft;
+  const targetLeft = Math.min(maxLeft, startLeft + forwardPx);
 
-  // base forward amount (container-relative). Keep it moderate.
-  const baseForward = Math.max(24, Math.round(containerWidth * (isMobile ? 0.30 : 0.18)));
-
-  // try to read obstacle position; if unavailable, just use baseForward
-  let obstacleRight = null;
-  try {
-    const obsRect = obstacle.getBoundingClientRect();
-    obstacleRight = obsRect.right; // page coordinates
-  } catch (err) {
-    obstacleRight = null;
-  }
-
-  // compute targetLeft: at least currLeft + baseForward,
-  // but if obstacle is in front, ensure we move to just past obstacle.right (+ buffer)
-  // translate obstacleRight (page coord) into container-relative left value
-  let desiredLeft = currLeft + baseForward;
-
-  if (obstacleRight !== null) {
-    const containerRect = container.getBoundingClientRect();
-    const obsRightRelative = obstacleRight - containerRect.left; // relative to container left
-    // if the obstacle is ahead of sheep and not already passed, ensure we pass it
-    if (obsRightRelative > (currLeft + 6)) {
-      // set desiredLeft to slightly past obstacleRightRelative
-      desiredLeft = Math.max(desiredLeft, obsRightRelative + 12); // +12px buffer
-    }
-  }
-
-  // clamp to maxLeft so we don't move off-screen
-  const targetLeft = Math.min(maxLeft, desiredLeft);
-
-  // start vertical animation (CSS keyframes)
+  // vertical animation
+  isCurrentlyJumping = true;
   sheep.classList.add("animateSheep");
 
-  // animate horizontal move over same duration as the jump (600ms)
-  const prevTransition = sheep.style.transition || "";
-  const jumpMs = 600;
-
-  // Use double rAF to make transitions reliable on mobile
+  // horizontal transition timed to CSS jump duration variable (--sheep-jump-ms) or default 520ms
+  const jumpMs =
+    parseInt(
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--sheep-jump-ms"
+      )
+    ) || 520;
+  // use double rAF for reliable start on mobile
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       sheep.style.transition = `left ${jumpMs}ms ease`;
@@ -180,233 +149,268 @@ function jump() {
     });
   });
 
-  // cleanup after jump
+  // cleanup after jump finishes
   setTimeout(() => {
+    sheep.style.transition = "";
     sheep.classList.remove("animateSheep");
-    sheep.style.transition = prevTransition;
-  }, jumpMs);
+    isCurrentlyJumping = false;
+  }, jumpMs + 8);
 }
 
-
-/* unified pointer handlers */
-function onControlPointer(ev, action) {
-  ev.preventDefault();
-  ev.stopPropagation();
-  recordPointer();
-  if (action === "left") moveLeft();
-  else if (action === "right") moveRight();
-  else if (action === "jump") jump();
+/* left & right controls */
+function moveLeft() {
+  if (!gameRunning || paused) return;
+  ensureSheepLeft();
+  sheep.style.left = Math.max(0, sheep.offsetLeft - computeStep()) + "px";
 }
-if (leftBtn)
-  leftBtn.addEventListener("pointerdown", (e) => onControlPointer(e, "left"));
-if (rightBtn)
-  rightBtn.addEventListener("pointerdown", (e) => onControlPointer(e, "right"));
-if (jumpBtn)
-  jumpBtn.addEventListener("pointerdown", (e) => onControlPointer(e, "jump"));
+function moveRight() {
+  if (!gameRunning || paused) return;
+  ensureSheepLeft();
+  const m = Math.max(
+    0,
+    (container.clientWidth || window.innerWidth) - sheep.offsetWidth - 6
+  );
+  sheep.style.left = Math.min(m, sheep.offsetLeft + computeStep()) + "px";
+}
 
-/* keyboard */
-document.addEventListener("keydown", (e) => {
-  tryPlaySound(audio);
-  if (!gameRunning) {
-    if (e.key === "r" || e.key === "R") startGame();
-    return;
-  }
-  if (e.key === "ArrowUp" || e.key === "w") jump();
-  if (e.key === "ArrowLeft" || e.key === "a") moveLeft();
-  if (e.key === "ArrowRight" || e.key === "d") moveRight();
-});
-
-/* collision detection: tightened and early-exit */
+/* collision detection (tuned) */
 function detectCollision() {
-  if (!gameRunning || ignoreCollisions) return false;
-  const sheepRect = sheep.getBoundingClientRect();
-  const obsRect = obstacle.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
+  if (!gameRunning || paused) return false;
+  const s = sheep.getBoundingClientRect();
+  const o = obstacle.getBoundingClientRect();
+  const cont = containerRect();
 
-  if (obsRect.left > containerRect.right - 8) return false;
-  if (obsRect.right < sheepRect.left || obsRect.left > sheepRect.right)
-    return false;
+  // if obstacle not yet on screen -> no collision
+  if (o.left > cont.right - 8) return false;
+  // basic AABB reject
+  if (o.right < s.left || o.left > s.right) return false;
 
-  const dx = Math.abs(
-    sheepRect.left + sheepRect.width / 2 - (obsRect.left + obsRect.width / 2)
-  );
-  const dy = Math.abs(
-    sheepRect.top + sheepRect.height / 2 - (obsRect.top + obsRect.height / 2)
-  );
-  // Easier collision on mobile
+  const dx = Math.abs(s.left + s.width / 2 - (o.left + o.width / 2));
+  const dy = Math.abs(s.top + s.height / 2 - (o.top + o.height / 2));
   const xFactor = isMobile ? 0.22 : 0.3;
   const yFactor = isMobile ? 0.28 : 0.36;
-
-  const collisionXThreshold = (sheepRect.width + obsRect.width) * xFactor;
-  const collisionYThreshold = (sheepRect.height + obsRect.height) * yFactor;
-
-  return dx < collisionXThreshold && dy < collisionYThreshold;
+  const thresholdX = (s.width + o.width) * xFactor;
+  const thresholdY = (s.height + o.height) * yFactor;
+  return dx < thresholdX && dy < thresholdY;
 }
 
-/* NEW robust scoring: use prevObstacleRight > sheepLeft and current obs.right < sheepLeft */
-function checkScoringByPassing() {
-  if (!gameRunning || ignoreCollisions) return;
-  const sheepRect = sheep.getBoundingClientRect();
-  const obsRect = obstacle.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
+/* scoring: simple and robust
+   - when obstacle.right < sheep.left AND not scoredForThisObstacle -> +1 and set flag
+   - when obstacle.left > container.right - margin -> reset flag for next cycle
+*/
+function checkScore() {
+  if (!gameRunning || paused) return;
+  const s = sheep.getBoundingClientRect();
+  const o = obstacle.getBoundingClientRect();
+  const cont = containerRect();
 
-  // if obstacle is off to the right (new cycle), reset flags
-  if (obsRect.left > containerRect.right - 20) {
+  // reset when obstacle cycles back from right side
+  if (o.left > cont.right - 20) {
     scoredForThisObstacle = false;
-    prevObstacleRight = obsRect.right;
     return;
   }
 
-  // Detect crossing: previously obstacle was to the right of sheep (prevObstacleRight > sheepLeft)
-  // and now obstacle.right is left of sheep.left => fully passed. Buffer a few px for reliability.
-  const sheepLeft = sheepRect.left;
-  const nowRight = obsRect.right;
-  if (
-    !scoredForThisObstacle &&
-    prevObstacleRight > sheepLeft + 2 &&
-    nowRight < sheepLeft - 2
-  ) {
+  if (!scoredForThisObstacle && o.right < s.left) {
     scoredForThisObstacle = true;
     score++;
-    updateScore(score);
-    // speed up obstacle a bit
-    const cur =
-      parseFloat(
-        window.getComputedStyle(obstacle).getPropertyValue("animation-duration")
-      ) || 5;
-    obstacle.style.animationDuration = Math.max(0.8, cur - 0.12) + "s";
+    updateScore();
+    // optional: speed up the obstacle a touch
+    try {
+      const computed =
+        getComputedStyle(obstacle).getPropertyValue("animation-duration");
+      const cur = parseFloat(computed) || 5;
+      obstacle.style.animationDuration = Math.max(0.8, cur - 0.08) + "s";
+    } catch (e) {}
   }
-
-  // update prevObstacleRight each frame
-  prevObstacleRight = obsRect.right;
-}
-
-/* game over handling */
-function onGameOver() {
-  if (!gameRunning) return;
-  gameRunning = false;
-  gameOverEl.textContent = "Game Over!";
-  audiogo.play().catch(() => {});
-  audio.pause();
-  obstacle.classList.remove("obstacleAni");
-
-  // remove previous hints
-  document.querySelectorAll(".restartHint").forEach((e) => e.remove());
-  restartHintAdded = false;
-
-  if (!restartHintAdded) {
-    const hint = document.createElement("div");
-    hint.className = "restartHint";
-    hint.textContent = "Tap anywhere or press R to restart";
-    gameOverEl.parentElement.appendChild(hint);
-    restartHintAdded = true;
-  }
-
-  if (gameLoopId) cancelAnimationFrame(gameLoopId);
-}
-
-/* restart */
-function restartGame() {
-  document.querySelectorAll(".restartHint").forEach((e) => e.remove());
-  restartHintAdded = false;
-
-  score = 0;
-  updateScore(score);
-  gameOverEl.textContent = "Welcome to SheepRush";
-  ignoreCollisions = true;
-  scoredForThisObstacle = false;
-  prevObstacleRight = Number.NEGATIVE_INFINITY;
-
-  setTimeout(() => {
-    ignoreCollisions = false;
-  }, 700);
-
-  obstacle.style.animationDuration = "";
-  obstacle.style.left = "";
-  void obstacle.offsetWidth;
-  obstacle.classList.add("obstacleAni");
-
-  sheep.style.left = ""; // reset to CSS default
-  ensureSheepHasInlineLeft();
-
-  tryPlaySound(audio);
-  gameRunning = true;
-  runGameLoop();
 }
 
 /* update score UI */
-function updateScore(s) {
-  scoreCont.textContent = "Your Score: " + s;
+function updateScore() {
+  if (scoreCont) scoreCont.textContent = "Your Score: " + score;
 }
 
 /* main loop */
 function gameStep() {
-  if (!gameRunning) return;
+  if (!gameRunning || paused) return;
   if (detectCollision()) {
-    onGameOver();
+    handleGameOver();
     return;
   }
-  checkScoringByPassing();
+  checkScore();
   gameLoopId = requestAnimationFrame(gameStep);
 }
-function runGameLoop() {
+function startLoop() {
   if (gameLoopId) cancelAnimationFrame(gameLoopId);
   gameLoopId = requestAnimationFrame(gameStep);
 }
-
-/* start sequence */
-function startGame() {
-  // ensure stable sheep inline left for jump
-  ensureSheepHasInlineLeft();
-
-  // wait up to 2s for assets then start
-  const deadline = Date.now() + 2000;
-  const wait = () => {
-    if (loadedCount >= totalAssets || Date.now() > deadline) {
-      beginRun();
-    } else setTimeout(wait, 120);
-  };
-  wait();
+function stopLoop() {
+  if (gameLoopId) cancelAnimationFrame(gameLoopId);
+  gameLoopId = null;
 }
+
+/* start / begin / restart / game over */
 function beginRun() {
-  tryPlaySound(audio);
-  if (startOverlay) startOverlay.remove();
-
-  document.querySelectorAll(".restartHint").forEach((e) => e.remove());
-  restartHintAdded = false;
-
-  // start obstacle after small settle, and set prevObstacleRight so first pass won't score prematurely
-  ignoreCollisions = true;
+  // called when start button pressed and assets allowed
+  scoredForThisObstacle = false;
+  score = 0;
+  updateScore();
+  gameRunning = true;
+  paused = false;
+  if (startOverlay && startOverlay.parentElement) startOverlay.remove();
+  // reset obstacle animation from fresh frame
   obstacle.classList.remove("obstacleAni");
   obstacle.style.left = "";
   void obstacle.offsetWidth;
-  setTimeout(() => {
-    const r = obstacle.getBoundingClientRect();
-    prevObstacleRight = r.right;
-    scoredForThisObstacle = false;
-    obstacle.classList.add("obstacleAni");
-    ignoreCollisions = false;
-  }, 350);
-
-  score = 0;
-  updateScore(score);
-  gameRunning = true;
-  runGameLoop();
+  obstacle.classList.add("obstacleAni");
+  tryPlay(audio);
+  startLoop();
+  if (pauseBtn) pauseBtn.textContent = "Pause";
 }
 
-/* click to restart but ignore if recent pointer */
-document.addEventListener("click", (e) => {
-  if (isRecentPointer()) return;
-  if (!gameRunning) restartGame();
+function startGame() {
+  if (gameRunning) return;
+  recordPointer();
+  const deadline = Date.now() + 1600;
+  const waitAssets = () => {
+    if (loadedCount >= totalAssets || Date.now() > deadline) {
+      beginRun();
+    } else setTimeout(waitAssets, 120);
+  };
+  waitAssets();
+}
+
+function restartGame() {
+  // resets game but does NOT auto-begin unless user presses Start
+  gameRunning = false;
+  paused = false;
+  if (audio) tryPause(audio);
+  obstacle.classList.remove("obstacleAni");
+  obstacle.style.left = "100vw";
+  sheep.style.left = "10px";
+  score = 0;
+  updateScore();
+  if (startOverlay && !document.body.contains(startOverlay))
+    document.body.appendChild(startOverlay);
+  if (gameOverEl) gameOverEl.textContent = "Welcome to SheepRush";
+  stopLoop();
+}
+
+function handleGameOver() {
+  if (!gameRunning) return;
+  gameRunning = false;
+  stopLoop();
+  if (gameOverEl) gameOverEl.textContent = "Game Over!";
+  tryPlay(audiogo);
+  tryPause(audio);
+  obstacle.classList.remove("obstacleAni");
+  // add restart hint
+  document.querySelectorAll(".restartHint").forEach((e) => e.remove());
+  const hint = document.createElement("div");
+  hint.className = "restartHint";
+  hint.textContent = "Press Start to play again";
+  (gameOverEl && gameOverEl.parentElement
+    ? gameOverEl.parentElement
+    : document.body
+  ).appendChild(hint);
+}
+
+/* Pause / resume */
+function setPaused(p) {
+  if (!gameRunning) return;
+  paused = p;
+  if (p) {
+    // freeze
+    obstacle.style.animationPlayState = "paused";
+    stopLoop();
+    tryPause(audio);
+    if (pauseBtn) {
+      pauseBtn.textContent = "Resume";
+      pauseBtn.setAttribute("aria-pressed", "true");
+    }
+  } else {
+    obstacle.style.animationPlayState = "running";
+    tryPlay(audio);
+    startLoop();
+    if (pauseBtn) {
+      pauseBtn.textContent = "Pause";
+      pauseBtn.setAttribute("aria-pressed", "false");
+    }
+  }
+}
+function togglePause() {
+  setPaused(!paused);
+}
+
+/* input wiring */
+if (leftBtn)
+  leftBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    recordPointer();
+    moveLeft();
+  });
+if (rightBtn)
+  rightBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    recordPointer();
+    moveRight();
+  });
+if (jumpBtn)
+  jumpBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    recordPointer();
+    jump();
+  });
+
+// keyboard events
+document.addEventListener("keydown", (e) => {
+  // block starting with keys — require Start button
+  if (!gameRunning && (e.key === "Enter" || e.key === " ")) return;
+  if (e.key === "ArrowUp" || e.key === "w") jump();
+  if (e.key === "ArrowLeft" || e.key === "a") moveLeft();
+  if (e.key === "ArrowRight" || e.key === "d") moveRight();
+  if (e.key === "p" || e.key === "P") togglePause();
+  if ((e.key === "r" || e.key === "R") && !gameRunning) restartGame();
 });
 
-/* wire start button */
+// start button
 if (startBtn)
-  startBtn.addEventListener("click", (e) => {
+  startBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     recordPointer();
     startGame();
   });
 
-/* init UI */
+// pause button
+if (pauseBtn)
+  pauseBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!gameRunning) return;
+    togglePause();
+  });
+
+// global click: do not auto-restart when overlay present
+document.addEventListener("click", (e) => {
+  if (isRecentPointer()) return;
+  if (startOverlay && document.body.contains(startOverlay)) return;
+  // if game over and overlay absent, clicking won't auto-start — user must press Start
+});
+
+/* init: make sure obstacle is not animating until start */
 obstacle.classList.remove("obstacleAni");
-updateScore(score);
+obstacle.style.left = "100vw";
+updateScore();
+if (gameOverEl) gameOverEl.textContent = "Press Start to play";
+
+/* expose debug hooks */
+window.__SheepRush = {
+  jump,
+  moveLeft,
+  moveRight,
+  startGame,
+  restartGame,
+  togglePause,
+  getScore: () => score,
+  isMobile,
+};

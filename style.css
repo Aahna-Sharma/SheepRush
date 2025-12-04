@@ -1,5 +1,3 @@
-/* style.css - responsive, safe-area aware, reserved-bottom for touch controls */
-
 /* reset */
 * {
     margin: 0;
@@ -13,7 +11,7 @@
     --score-font: clamp(16px, 3.5vw, 28px);
     --gameover-font: clamp(22px, 5.5vw, 48px);
     --controls-reserve: 88px;
-    /* reserved height for controls on small screens */
+    --obstacle-duration: 5s;
 }
 
 /* page */
@@ -28,7 +26,7 @@ body {
     overflow: hidden;
 }
 
-/* game container */
+/* container */
 .gameContainer {
     position: relative;
     width: 100vw;
@@ -37,9 +35,6 @@ body {
     background-repeat: no-repeat;
     background-position: center;
     background-size: cover;
-    overflow: hidden;
-
-    /* reserve bottom space so sprites sit above controls on mobile */
     padding-bottom: calc(var(--controls-reserve) + env(safe-area-inset-bottom, 0px));
 }
 
@@ -53,22 +48,54 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.35rem;
+    gap: .35rem;
     pointer-events: none;
+}
+
+.hud-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    pointer-events: auto;
 }
 
 .gameOver {
     font-size: var(--gameover-font);
     text-align: center;
     font-family: fantasy;
-    color: rgba(0, 0, 0, 0.9);
-    text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.6);
+    color: rgba(0, 0, 0, .9);
+    text-shadow: 1px 1px 2px rgba(255, 255, 255, .6);
     line-height: 1;
 }
 
 #scoreCont {
     font-size: var(--score-font);
     color: royalblue;
+}
+
+/* Pause button */
+.hud-btn {
+    margin: 10px;
+    padding: 10px 10px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    background: #11132a;
+    color: #fff;
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+    
+    top: 150px;
+    border: 3px solid rgb(255, 255, 255) ;
+    text-align: center;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, .6);
+}
+
+.hud-btn:hover{
+    background: #fff;
+    color: #11132a;
+    border: 3px solid rgb(0, 0, 0) ;
 }
 
 /* sprites */
@@ -82,7 +109,6 @@ body {
     background-size: contain;
     background-position: center;
     z-index: 30;
-    /* above ground but below HUD */
     pointer-events: none;
 }
 
@@ -90,7 +116,6 @@ body {
     position: absolute;
     bottom: var(--ground-offset);
     left: 100vw;
-    /* animation controls left value */
     width: var(--sprite-size);
     height: var(--sprite-size);
     background-image: url('dragon.png');
@@ -100,9 +125,10 @@ body {
     pointer-events: none;
 }
 
-/* obstacle animation: animate left from right edge to fully off-left by sprite width */
+/* obstacle animation: left 100vw -> -sprite */
 .obstacleAni {
-    animation: obstacleAni var(--obstacle-duration, 5s) linear infinite;
+    animation: obstacleAni var(--obstacle-duration) linear infinite;
+    animation-play-state: running;
 }
 
 @keyframes obstacleAni {
@@ -115,20 +141,25 @@ body {
     }
 }
 
-/* sheep jump */
+/* Sheep jump (deterministic): keyframes tuned so vertical is consistent */
 .animateSheep {
-    animation: sheep 0.6s ease;
+    animation: sheepJump var(--sheep-jump-ms, 520ms) cubic-bezier(.2, .7, .2, 1) both;
 }
 
-@keyframes sheep {
+@keyframes sheepJump {
     0% {
         bottom: var(--ground-offset);
         transform: translateY(0);
     }
 
-    50% {
-        bottom: calc(var(--ground-offset) + clamp(220px, 28vh, 420px));
-        transform: translateY(-4px);
+    30% {
+        bottom: calc(var(--ground-offset) + clamp(140px, 20vh, 320px));
+        transform: translateY(-2px);
+    }
+
+    60% {
+        bottom: calc(var(--ground-offset) + clamp(120px, 18vh, 260px));
+        transform: translateY(-2px);
     }
 
     100% {
@@ -151,8 +182,8 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.45);
-    z-index: 999;
+    background: rgba(0, 0, 0, .45);
+    z-index: 9999;
 }
 
 .start-card {
@@ -160,7 +191,7 @@ body {
     padding: 1rem 1.2rem;
     border-radius: 10px;
     text-align: center;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
 }
 
 #startBtn {
@@ -171,23 +202,22 @@ body {
     cursor: pointer;
 }
 
-/* touch controls - fixed so they sit above the reserved space and phone UI */
+/* touch controls */
 .touch-controls {
     position: fixed;
     left: 50%;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
     transform: translateX(-50%);
     display: none;
-    gap: 0.5rem;
+    gap: .5rem;
     z-index: 90;
     pointer-events: auto;
     padding: 6px;
-    background: linear-gradient(to top, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.7));
+    background: linear-gradient(to top, rgba(255, 255, 255, .9), rgba(255, 255, 255, .7));
     border-radius: 14px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
 }
 
-/* individual buttons */
 .tc-btn {
     width: 64px;
     height: 64px;
@@ -198,13 +228,12 @@ body {
     align-items: center;
     justify-content: center;
     background: #fff;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, .12);
     touch-action: manipulation;
-    -webkit-user-select: none;
     user-select: none;
 }
 
-/* small screen styles */
+/* small screens */
 @media (max-width:700px) {
     .touch-controls {
         display: flex;
@@ -218,13 +247,10 @@ body {
         font-size: 20px;
     }
 
-    .hud {
-        top: 1vh;
-    }
-
     :root {
         --sprite-size: clamp(64px, 22vw, 140px);
         --ground-offset: calc(clamp(8vh, 11vh, 120px) + var(--controls-reserve));
+        --sheep-jump-ms: 520ms;
     }
 
     .gameOver {
